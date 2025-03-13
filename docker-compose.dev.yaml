@@ -1,0 +1,167 @@
+services:
+  # Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres_dev
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - microservices_dev
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Message broker
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: rabbitmq_dev
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq_dev_data:/var/lib/rabbitmq
+    networks:
+      - microservices_dev
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'check_port_connectivity']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway - Development Mode
+  gateway:
+    build:
+      context: .
+      dockerfile: ./apps/gateway/Dockerfile
+      target: builder
+    container_name: gateway_dev
+    ports:
+      - '${GATEWAY_PORT:-3000}:3000'
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - DEBUG=${DEBUG}
+      - PORT=${PORT:-3000}
+      - CORS_ORIGIN=${CORS_ORIGIN}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run start:dev gateway
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices_dev
+    restart: unless-stopped
+
+  # Auth Service - Development Mode
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./apps/auth/Dockerfile
+      target: builder
+    container_name: auth_service_dev
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRATION=${JWT_EXPIRATION}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - JWT_REFRESH_EXPIRATION=${JWT_REFRESH_EXPIRATION}
+      - DEBUG=${DEBUG}
+      - LOG_LEVEL=${LOG_LEVEL}
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    command: npm run start:dev auth
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices_dev
+    restart: unless-stopped
+    # ports:
+    # - '${AUTH_SERVICE_PORT:-3001}:3000'
+
+  # # Todo Service - Development Mode
+  # todo-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./apps/todo/Dockerfile
+  #     target: builder
+  #   container_name: todo_service_dev
+  #   environment:
+  #     - NODE_ENV=${NODE_ENV}
+  #     - RABBITMQ_URL=${RABBITMQ_URL}
+  #     - DATABASE_URL=${DATABASE_URL}
+  #     - DEBUG=${DEBUG}
+  #     - LOG_LEVEL=${LOG_LEVEL}
+  #   volumes:
+  #     - ./:/app
+  #     - /app/node_modules
+  #   command: npm run start:dev todo
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - microservices_dev
+  #   restart: unless-stopped
+  #   # Uncomment to expose port for direct service access during development
+  #   ports:
+  #     - '${TODO_SERVICE_PORT:-3002}:3000'
+
+  # # Notification Service - Development Mode
+  # notification-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./apps/notification/Dockerfile
+  #     target: builder
+  #   container_name: notification_service_dev
+  #   environment:
+  #     - NODE_ENV=${NODE_ENV}
+  #     - RABBITMQ_URL=${RABBITMQ_URL}
+  #     - SMTP_HOST=${SMTP_HOST}
+  #     - SMTP_PORT=${SMTP_PORT}
+  #     - SMTP_USER=${SMTP_USER}
+  #     - SMTP_PASSWORD=${SMTP_PASSWORD}
+  #     - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+  #     - DEBUG=${DEBUG}
+  #     - LOG_LEVEL=${LOG_LEVEL}
+  #   volumes:
+  #     - ./:/app
+  #     - /app/node_modules
+  #   command: npm run start:dev notification
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   networks:
+  #     - microservices_dev
+  #   restart: unless-stopped
+  #   # Uncomment to expose port for direct service access during development
+  #   ports:
+  #     - '${NOTIFICATION_SERVICE_PORT:-3003}:3000'
+
+networks:
+  microservices_dev:
+    driver: bridge
+
+volumes:
+  postgres_dev_data:
+  rabbitmq_dev_data:

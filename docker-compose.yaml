@@ -1,0 +1,127 @@
+services:
+  # Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: todo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservices
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Message broker
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: rabbitmq
+    ports:
+      - '5672:5672' # AMQP protocol port
+      - '15672:15672' # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - microservices
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'check_port_connectivity']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway
+  gateway:
+    build:
+      context: .
+      dockerfile: ./apps/gateway/Dockerfile
+    container_name: gateway
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=development
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # Auth Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: ./apps/auth/Dockerfile
+    container_name: auth-service
+    environment:
+      - NODE_ENV=development
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/todo
+      - JWT_SECRET=your-jwt-secret-key
+      - JWT_EXPIRATION=1d
+      - JWT_REFRESH_SECRET=your-refresh-secret-key
+      - JWT_REFRESH_EXPIRATION=7d
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices
+    restart: unless-stopped
+
+  # Todo Service
+  # todo-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./apps/todo/Dockerfile
+  #   container_name: todo-service
+  #   environment:
+  #     - NODE_ENV=development
+  #     - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+  #     - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/todo
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - microservices
+  #   restart: unless-stopped
+
+  # # Notification Service
+  # notification-service:
+  #   build:
+  #     context: .
+  #     dockerfile: ./apps/notification/Dockerfile
+  #   container_name: notification-service
+  #   environment:
+  #     - NODE_ENV=development
+  #     - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+  #     - SMTP_HOST=smtp.example.com
+  #     - SMTP_PORT=587
+  #     - SMTP_USER=your-smtp-user
+  #     - SMTP_PASSWORD=your-smtp-password
+  #   depends_on:
+  #     - rabbitmq
+  #   networks:
+  #     - microservices
+  #   restart: unless-stopped
+
+networks:
+  microservices:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
